@@ -8,6 +8,7 @@ Jalankan dengan: python telegram_bot.py
 import os
 import logging
 import httpx
+import asyncio
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import (
@@ -35,6 +36,7 @@ class TelegramBot:
         """Initialize bot dengan token dari .env"""
         self.token = os.getenv("TELEGRAM_BOT_TOKEN")
         self.api_url = os.getenv("API_URL", "http://localhost:8000")
+        self.application = None
         
         if not self.token:
             logger.error("❌ TELEGRAM_BOT_TOKEN tidak ditemukan di .env")
@@ -43,10 +45,7 @@ class TelegramBot:
         logger.info(f"✅ Bot Token: {self.token[:30]}...")
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /start command
-        Menampilkan welcome message
-        """
+        """Handle /start command"""
         try:
             user = update.effective_user
             
@@ -78,13 +77,13 @@ Silakan mulai dengan mengetik pesan! 🚀
             
         except Exception as e:
             logger.error(f"❌ Error in start: {str(e)}")
-            await update.message.reply_text("❌ Terjadi kesalahan saat start bot")
+            try:
+                await update.message.reply_text("❌ Terjadi kesalahan saat start bot")
+            except:
+                pass
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /help command
-        Menampilkan bantuan lengkap
-        """
+        """Handle /help command"""
         try:
             help_text = """
 📚 **BANTUAN - Agen AI Inaproc Bot**
@@ -126,13 +125,9 @@ Butuh bantuan lebih? Hubungi admin.
             
         except Exception as e:
             logger.error(f"❌ Error in help: {str(e)}")
-            await update.message.reply_text("❌ Terjadi kesalahan")
     
     async def about_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /about command
-        Menampilkan informasi bot
-        """
+        """Handle /about command"""
         try:
             about_text = """
 ℹ️ **TENTANG - Agen AI Inaproc**
@@ -171,13 +166,9 @@ Hubungi admin untuk bantuan lebih lanjut.
             
         except Exception as e:
             logger.error(f"❌ Error in about: {str(e)}")
-            await update.message.reply_text("❌ Terjadi kesalahan")
     
     async def clear_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /clear command
-        Hapus conversation history
-        """
+        """Handle /clear command"""
         try:
             user = update.effective_user
             context.user_data.clear()
@@ -194,13 +185,9 @@ Dimulai fresh conversation! 🔄
             
         except Exception as e:
             logger.error(f"❌ Error in clear: {str(e)}")
-            await update.message.reply_text("❌ Terjadi kesalahan")
     
     async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle /status command
-        Cek status bot dan API
-        """
+        """Handle /status command"""
         try:
             status_text = "🔍 **Mengecek Status...**\n"
             
@@ -231,13 +218,9 @@ Dimulai fresh conversation! 🔄
             
         except Exception as e:
             logger.error(f"❌ Error in status: {str(e)}")
-            await update.message.reply_text("❌ Terjadi kesalahan saat check status")
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle regular messages
-        Proses pesan user dan kirim ke API
-        """
+        """Handle regular messages"""
         try:
             user = update.effective_user
             message_text = update.message.text
@@ -250,7 +233,6 @@ Dimulai fresh conversation! 🔄
             # Try to get response from API
             try:
                 async with httpx.AsyncClient(timeout=10) as client:
-                    # Call API endpoint
                     response = await client.post(
                         f"{self.api_url}/api/agent/chat",
                         json={"prompt": message_text, "user_id": str(user.id)},
@@ -289,50 +271,52 @@ Dimulai fresh conversation! 🔄
             
         except Exception as e:
             logger.error(f"❌ Error handling message: {str(e)}")
-            await update.message.reply_text(f"❌ Terjadi kesalahan: {str(e)}")
+            try:
+                await update.message.reply_text(f"❌ Terjadi kesalahan: {str(e)}")
+            except:
+                pass
     
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """
-        Handle errors
-        Log semua error yang terjadi
-        """
+        """Handle errors"""
         logger.error(f"❌ Update caused error: {context.error}")
     
     async def run(self):
-        """
-        Run bot
-        Setup handlers dan mulai polling
-        """
+        """Run bot dengan proper initialization"""
         logger.info("🤖 Membuat Telegram Bot Application...")
         
         # Create application
-        app = Application.builder().token(self.token).build()
+        self.application = Application.builder().token(self.token).build()
         
         logger.info("📋 Menambahkan handlers...")
         
         # Add command handlers
-        app.add_handler(CommandHandler("start", self.start))
-        app.add_handler(CommandHandler("help", self.help_command))
-        app.add_handler(CommandHandler("about", self.about_command))
-        app.add_handler(CommandHandler("clear", self.clear_command))
-        app.add_handler(CommandHandler("status", self.status_command))
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("help", self.help_command))
+        self.application.add_handler(CommandHandler("about", self.about_command))
+        self.application.add_handler(CommandHandler("clear", self.clear_command))
+        self.application.add_handler(CommandHandler("status", self.status_command))
         
-        # Add message handler (untuk pesan biasa)
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
+        # Add message handler
+        self.application.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message)
+        )
         
         # Add error handler
-        app.add_error_handler(self.error_handler)
+        self.application.add_error_handler(self.error_handler)
         
         logger.info("✅ Handler berhasil ditambahkan")
         logger.info("🚀 Bot sedang start dengan polling mode...")
         
-        # Start bot
-        await app.start()
+        # Initialize and start bot
+        await self.application.initialize()
+        logger.info("✅ Bot Application initialized!")
+        
+        await self.application.start()
         logger.info("✅ Bot Application started!")
         
         # Start polling
         logger.info("📡 Bot mulai listen ke messages...")
-        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await self.application.updater.start_polling(allowed_updates=Update.ALL_TYPES)
         logger.info("✅ Bot Polling started!")
         
         # Display ready message
@@ -348,13 +332,15 @@ Dimulai fresh conversation! 🔄
                 await asyncio.sleep(1)
         except KeyboardInterrupt:
             logger.info("⏹️ Stopping bot...")
-            await app.updater.stop()
-            await app.stop()
+        finally:
+            # Graceful shutdown
+            await self.application.updater.stop()
+            await self.application.stop()
+            await self.application.shutdown()
+            logger.info("✅ Bot stopped successfully")
 
 async def main():
-    """
-    Main entry point
-    """
+    """Main entry point"""
     try:
         logger.info("🚀 Starting Agen AI Inaproc Telegram Bot...")
         logger.info(f"📝 API URL: {os.getenv('API_URL', 'http://localhost:8000')}")
@@ -375,5 +361,4 @@ async def main():
         traceback.print_exc()
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())
